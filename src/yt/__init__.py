@@ -11,6 +11,7 @@ import sys
 import urllib
 import urllib2
 import argparse
+import time
 
 import os
 
@@ -19,6 +20,14 @@ MPLAYER_MODE="mplayer"
 OMXPLAYER_MODE="omxplayer"
 MPV_MODE="mpv"
 
+# This is for the new Youtube APIv3 stuff as it stands you would
+# need your own key to make this work see:
+# https://developers.google.com/youtube/v3/
+DEVELOPER_KEY = ""
+# This is Russell Brand's The Trews show channel id
+# Use search to find other channelids, press 'i' then the video number to see the channel id
+CHANNELID = "UCswH8ovgUp5Bdg-0_JTYFNw"
+
 def main():
     """
     Launch yt, allowing user to specify player.
@@ -26,10 +35,10 @@ def main():
 
     # Allow the user to specify whether to use mplayer or omxplayer for playing videos.
     parser = argparse.ArgumentParser(prog='yt',formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    
+
     parser.add_argument("--player",default=MPLAYER_MODE,choices=[MPLAYER_MODE,OMXPLAYER_MODE,MPV_MODE],help="specifies what program to use to play videos")
     parser.add_argument("--novideo", default=False, action='store_true', help="Play selection while suppressing video e.g. Audio only NOTE: This flag is ignored when using omxplayer")
-    parser.add_argument("--bandwidth", help="Choose prefered minimum video quality. This value will be prefered video quality and will increment up if chosen setting is unavailable. Example: \"--bandwidth 5\" will try and use codec #5 (240p) and if unavailable, will step up to codec #18 (270p/360p). Valid choices from low to high are \"17, 5, 18, 43\"", type=int)
+    parser.add_argument("--bandwidth", help="Choose prefered video quality. Example: \"--bandwidth 5\" will try and use codec #5 (240p). Valid choices depend on video ", type=int)
     
     args = parser.parse_args(sys.argv[1:])
 
@@ -70,14 +79,11 @@ class Ui(object):
         self._last_feed = None
 
         # The ordering
-        self._ordering = 'relevance'
+        self._ordering = 'date'
 
         # Specify the current feed
-        # if len(sys.argv) > 1:
-        # self._feed = search(' '.join(sys.argv[1:]))
-        #else:
-        self._feed = standard_feed('most_viewed')
-
+        # now done with the CHANNELID define above 
+        self._feed = standard_feed('')
         # The items to display in the pager
         self._items = None
 
@@ -85,7 +91,7 @@ class Ui(object):
         self._ordering_names = {
             'relevance': 'relevance',
             'viewCount': 'view count',
-            'published': 'publication date',
+            'date': 'publication date',
             'rating': 'rating',
         }
         
@@ -94,17 +100,18 @@ class Ui(object):
         
         # Do we want to display video or just audio.
         self._novideo = args.novideo
-
+        
         # Where do we want audio to go through? (RPi)
         # "local" (analog device) or "hdmi".
         self._audio = 'local'
-        
+
         # Setting a bandwidth preference order
         if args.bandwidth:
-            bandwidth_order = ["17","/","5","/","18","/","43"]
-            arg_position = bandwidth_order.index(str(args.bandwidth))
-            bandwidth_order_string = ''.join(bandwidth_order[arg_position:])
-            self._bandwidth = bandwidth_order_string
+            #bandwidth_order = ["247","/","248","/","244","/","243"]
+            #arg_position = bandwidth_order.index(str(args.bandwidth))
+            #bandwidth_order_string = ''.join(bandwidth_order[arg_position:])
+            #self._bandwidth = bandwidth_order_string
+            self._bandwidth = str(args.bandwidth)
         else:
             self._bandwidth = None
 
@@ -142,13 +149,12 @@ class Ui(object):
 
         self._status = ''
         self._help = [
-                ('[/]', 'prev/next'),
+                ('[/]', 'prev/next '),
                 ('o', 'ordering'),
                 ('s', 'search'),
                 ('1-9', 'choose'),
-                ('v', 'choose index'),
+                ('v', 'choose video'),
                 ('d', 'download'),
-                ('u', 'user'),
                 ('n', 'toggle novideo'),
         ]
 
@@ -192,16 +198,10 @@ class Ui(object):
         curses.curs_set(0)
         return s
 
-    def _get_feed(self, start, count):
+    def _get_feed(self, count, pagetoken):
         count = min(count, 25) # 25 is the max number of results we can get in one go
-        start += 1 # FSR, Google decides to 1-index this
-
-        if self._last_feed is not None and 'data' in self._last_feed \
-            and int(self._last_feed['data']['itemsPerPage']) >= count \
-            and int(self._last_feed['data']['startIndex']) == start:
-                return self._last_feed
         self._show_message(u'Talking to YouTube\u2026')
-        self._last_feed = self._feed['fetch_cb'](start, count, self._ordering)
+        self._last_feed = self._feed['fetch_cb'](count, self._ordering, pagetoken)
         return self._last_feed
 
     def _update_screen(self):
@@ -228,22 +228,23 @@ class Ui(object):
 
     def _run_pager(self):
         idx = 0
+        pagetoken = ''
         while True:
             # Get size of window and => number of items/page
             (h, w) = self._main_win.getmaxyx()
             n_per_page = h // 3
 
             # Get the items for the current page
-            feed = self._get_feed(idx, n_per_page)
+            feed = self._get_feed(n_per_page, pagetoken)
             self._items = None
-            if feed is not None and 'data' in feed and 'items' in feed['data']:
-                feed = self._get_feed(idx, n_per_page)
-                self._items = feed['data']['items']
+            if feed is not None:
+                feed = self._get_feed(n_per_page, pagetoken)
+                self._items = feed['items']
                 if len(self._items) > n_per_page:
                     self._items = self._items[:n_per_page]
 
             if self._items is not None:
-                self._status = 'Showing %i-%i of %s' % (idx+1, idx+len(self._items), self._feed['description'])
+                self._status = 'Showing %i-%i of %i in %s' % (idx+1, idx+len(self._items), feed['pageInfo']['totalResults'], self._feed['description'])
             else:
                 self._status = 'No results for %s' % (self._feed['description'],)
 
@@ -260,14 +261,14 @@ class Ui(object):
             if c == ord('q'): # quit
                 break
             elif c == ord(']'): # next
-                # have we had all the items?
-                if not 'data' in self._last_feed or not 'totalItems' in self._last_feed['data'] or len(self._items) + idx < self._last_feed['data']['totalItems']:
-                    idx += n_per_page
+                idx += n_per_page
+                pagetoken = self._last_feed['nextPageToken']
             elif c == ord('['): # previous
                 if idx > n_per_page:
                     idx -= n_per_page
                 else:
                     idx = 0
+                pagetoken = self._last_feed['prevPageToken'] if 'prevPageToken' in self._last_feed else ''
             elif c == ord('s'): # search
                 s = self._input('search')
                 if s is not None and len(s) > 0:
@@ -289,13 +290,6 @@ class Ui(object):
                         self._download_video(int(s) - 1)
                     except ValueError:
                         pass
-            elif c == ord('u'): # user
-                s = self._input('user')
-                if s is not None and len(s) > 0:
-                    self._feed = user(s)
-                    self._last_feed = None
-                    self._ordering = 'published'
-                    idx = 0
             elif c >= ord('1') and c <= ord('9'): # specific video
                 self._play_video(c - ord('1'))
             elif c == ord('o'): # ordering
@@ -309,12 +303,22 @@ class Ui(object):
                     elif oc == ord('v'):
                         self._ordering = 'viewCount'
                     elif oc == ord('p'):
-                        self._ordering = 'published'
+                        self._ordering = 'date'
                     elif oc == ord('t'):
                         self._ordering = 'rating'
 
                 self._last_feed = None
                 idx = 0
+            elif c == ord('i'): # ordering
+                self._show_message('Get ch id for video 1-9?')
+                oc = self._main_win.getch()
+                info_num = None
+                while info_num is None:
+                   if oc >= ord('1') and oc <= ord('9'):
+                       info_num = int(chr(oc))
+                       self._show_message(feed['items'][info_num]['snippet']['channelId'])
+                       #self._show_message(str(info_num))
+                       time.sleep(10)
             elif c == ord('n'): # toggle novideo
                 self._novideo = not self._novideo
 
@@ -324,7 +328,7 @@ class Ui(object):
         if self._items is None or idx < 0 or idx >= len(self._items):
             return
         item = self._items[idx]
-        url = item['player']['default']
+        url = "http://www.youtube.com/watch?v=" + item['id']['videoId']
         self._show_message('Playing ' + url)
         play_url(url,self._player,self._novideo,self._bandwidth,self._audio)
 
@@ -362,14 +366,13 @@ class Ui(object):
         if w <= 0:
             return
 
-        title = item['title']
+        title = item['snippet']['title']
         uploader = item['uploader']
 
-        likes = int(item['likeCount']) if 'likeCount' in item else 0
-        ratings = int(item['ratingCount']) if 'ratingCount' in item else 0
+        duration = item['duration'] if 'duration' in item else '' 
+        duration = duration[+2:]
         comments = int(item['commentCount']) if 'commentCount' in item else 0
         views = int(item['viewCount']) if 'viewCount' in item else 0
-        favorites = int(item['favoriteCount']) if 'favoriteCount' in item else 0
 
         # Show the title and uploader, prioritising the title
         if len(uploader) > w:
@@ -378,18 +381,16 @@ class Ui(object):
             self._main_win.addstr(y,x,truncate(title, w-len(uploader)).encode(self._code), self._title_attr)
             self._main_win.addstr(y,x+w-len(uploader), uploader.encode(self._code), self._uploader_attr)
 
-        desc = item['description']
+        desc = item['snippet']['description'] 
         if desc is None or len(desc.strip()) == 0:
             desc = 'No description'
         desc = re.sub(r'[\n\r]', r' ', desc)
         self._main_win.addstr(y+1,x,truncate(desc, w).encode(self._code), curses.color_pair(2))
         self._add_table_row([
-                ('d', duration(item['duration'])),
+                ('d', '%s' % duration),
                 ('v', number(views)),
                 ('c', number(comments)),
-                ('l/d', '%s/%s' % (number(likes), number(ratings - likes)) ),
-                ('f', number(favorites)),
-            ], y+2, x, w, curses.color_pair(3) | curses.A_DIM, max_width=22)
+            ], y+2, x, w, curses.color_pair(3) | curses.A_DIM, max_width=40)
 
     def _show_message(self, s):
         # Check length of message
@@ -509,47 +510,48 @@ def download_url(url,novideo,bandwidth):
     return yt_dl
 
 def play_url(url,player,novideo,bandwidth,audio):
+    t_url=url
     assert player in [MPLAYER_MODE,OMXPLAYER_MODE,MPV_MODE]
     if player == MPV_MODE:
         # mpv can handle youtube URLs through quvi
         play_url_mpv(url, novideo)
     elif player == MPLAYER_MODE:
         url = get_playable_url(url, novideo, bandwidth)
-        play_url_mplayer(url,novideo)
+        play_url_mplayer(url,novideo,t_url,bandwidth)
     else:
         url = get_playable_url(url, novideo, bandwidth)
         play_url_omxplayer(url,audio)
 
 def get_playable_url(url, novideo, bandwidth):
-    if bandwidth:
+    t_url=url
+    if novideo:
+      #Choosing a low bitrate codec since we will be dropping the video anyway
+      call = "youtube-dl -g -f " + "171/140/136/247/18/43/133 " + url
+      url = os.popen(call).read()
+    elif bandwidth:
       #'subprocess.Popen' is not calling youtube-dl properly when using '-f' flag, so here we are using 'os.popen'
       call = "youtube-dl -g -f " + bandwidth + " " + url
       url = os.popen(call).read()
-    elif novideo:
-      #Choosing a low bitrate codec since we will be dropping the video anyway
-      call = "youtube-dl -g -f " + "5/18/43 " + url
+      
+      
+    else:
+      call = "youtube-dl -g -f 22 " + url
       url = os.popen(call).read()
-    else:
-      yt_dl = subprocess.Popen(['youtube-dl', '-g', url], stdout = subprocess.PIPE, stderr = subprocess.PIPE)
-      (url, err) = yt_dl.communicate()
-
-      if yt_dl.returncode != 0:
-          sys.stderr.write(err)
-          raise RuntimeError('Error getting URL.')
     return url
-
-def play_url_mplayer(url,novideo):
-  
-    if novideo:
-      player = subprocess.Popen(
-            ['mplayer', '-quiet', '-novideo', '--', url.decode('UTF-8').strip()],
-            stdout = subprocess.PIPE, stderr = subprocess.PIPE)
+    
+def play_url_mplayer(url,novideo,t_url,bandwidth):
+    
+    if novideo or not bandwidth:
+	player = subprocess.Popen(
+	['vlc', '--quiet','--no-video-title-show','--play-and-exit', url.decode('UTF-8').strip()],
+	stdout = subprocess.PIPE, stderr = subprocess.PIPE)
     else:
-      player = subprocess.Popen(
-            ['mplayer', '-quiet', '', '--', url.decode('UTF-8').strip()],
-            stdout = subprocess.PIPE, stderr = subprocess.PIPE)
-    player.wait()
-        
+	call = "youtube-dl -g -f " + "171 " + t_url
+	t_url = os.popen(call).read()
+	player = subprocess.Popen(
+	['vlc', '--quiet','--no-video-title-show','--play-and-exit', url.decode('UTF-8').strip(),'--input-slave', t_url.decode('UTF-8').strip()],
+	stdout = subprocess.PIPE, stderr = subprocess.PIPE)
+	    
 def play_url_omxplayer(url,audio):
     player = subprocess.Popen(
             ['omxplayer', '-o%s' % audio, url.decode('UTF-8').strip()],
@@ -558,60 +560,78 @@ def play_url_omxplayer(url,audio):
 
     # fix black X screen after omxplayer playback
     # http://elinux.org/Omxplayer#Black_screen_after_playback
-    os.system('xrefresh -display :0')
+    # This causes an error when playing from Raspberry Pi command line so commenting out for now
+    # os.system('xrefresh -display :0')
 
 def play_url_mpv(url, novideo):
     player = subprocess.Popen(['mpv', '--really-quiet', '--', url],
             stdout = subprocess.PIPE, stderr = subprocess.PIPE)
     player.wait()
 
-def search(terms):
-    def fetch_cb(start, maxresults, ordering):
-        url = 'https://gdata.youtube.com/feeds/api/videos'
+def get_video_info(search_results):
+
+        count = 0
+        video_ids = ''
+        for search_item in search_results["items"]:
+          video_ids += search_item["id"]["videoId"] + ','
+          search_results["items"][count]["uploader"] = " "
+          count += 1
+
+        url = 'https://www.googleapis.com/youtube/v3/videos'
         query = {
-            'q': terms,
-            'v': 2,
-            'alt': 'jsonc',
-            'start-index': start,
-            'max-results': maxresults,
-            'orderby': ordering,
+            'part': 'statistics, contentDetails',
+            'id': video_ids,
+            'key': DEVELOPER_KEY,
         }
-        return json.load(urllib2.urlopen('%s?%s' % (url, urllib.urlencode(query))))
+        video_results  = json.load(urllib2.urlopen('%s?%s' % (url, urllib.urlencode(query))))
+        count = 0
+        for video_item in video_results["items"]:
+          search_results["items"][count]["duration"] = video_item["contentDetails"]["duration"]
+          search_results["items"][count]["viewCount"] = video_item["statistics"]["viewCount"]
+          search_results["items"][count]["commentCount"] = 0 #video_item["statistics"]["commentCount"]
+          count += 1
+        return search_results
+
+def search(terms):
+    def fetch_cb(maxresults, ordering, pagetoken):
+        url = 'https://www.googleapis.com/youtube/v3/search'
+        query = {
+            'part': 'id,snippet',
+            'maxResults': maxresults,
+            'order': ordering,
+            'pageToken': pagetoken,
+            'q' : terms,
+            'type': 'video',
+            'key': DEVELOPER_KEY,
+        }
+        search_results = json.load(urllib2.urlopen('%s?%s' % (url, urllib.urlencode(query))))
+
+        return get_video_info(search_results)
 
     return { 'fetch_cb': fetch_cb, 'description': 'search for "%s"' % (terms,) }
 
-def user(username):
-    def fetch_cb(start, maxresults, ordering):
-        url = 'https://gdata.youtube.com/feeds/api/users/%s/uploads' % (username,)
-        query = {
-            'v': 2,
-            'alt': 'jsonc',
-            'start-index': start,
-            'max-results': maxresults,
-            'orderby': ordering,
-        }
-        return json.load(urllib2.urlopen('%s?%s' % (url, urllib.urlencode(query))))
-
-    return { 'fetch_cb': fetch_cb, 'description': 'uploads by "%s"' % (username,) }
-
 def standard_feed(feed_name):
-    def fetch_cb(start, maxresults, ordering):
-        url = 'https://gdata.youtube.com/feeds/api/standardfeeds/%s' % (feed_name,)
+    
+    def fetch_cb( maxresults,ordering,pagetoken):
+
+        url = 'https://www.googleapis.com/youtube/v3/search'
         query = {
-            'v': 2,
-            'alt': 'jsonc',
-            'start-index': start,
-            'max-results': maxresults,
-            'orderby': ordering,
+            'part': 'id,snippet',
+            'channelId': CHANNELID,
+            'maxResults': maxresults,
+            'order': ordering,
+            'pageToken': pagetoken,
+            'type': 'video',
+            'key': DEVELOPER_KEY,
         }
-        return json.load(urllib2.urlopen('%s?%s' % (url, urllib.urlencode(query))))
+        search_results = json.load(urllib2.urlopen('%s?%s' % (url, urllib.urlencode(query))))
 
-    feed = { 'fetch_cb': fetch_cb, 'description': '??? standard feed' }
+        return get_video_info(search_results)
 
-    if feed_name == 'most_viewed':
-        feed['description'] = 'most viewed'
-
+    feed = { 'fetch_cb': fetch_cb, 'description': 'standard feed' }
     return feed
+                 
+
 
 # Make it easy to run module by itself without using external tools to deploy it and
 # create additional launch scripts.

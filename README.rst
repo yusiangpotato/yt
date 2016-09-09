@@ -1,6 +1,13 @@
 ``yt``: a command-line YouTube client
 =====================================
 
+NOTE: This is a fork of a old version of yt with the following new features:
+1) the default player changed from mplayer to vlc
+2) the default codec changed to using 720p MP4 (legacy support in youtube)
+3) the ability to use DASH video with the audio automatically fetched*
+4) the OMXplayer and mpv maybe not working at all!
+5) is working with the v2 API but need the developer key to use
+
 ``yt`` is a command-line front-end to YouTube which allows you to browse YouTube
 videos and play them directly from the command-line. It uses ``youtube-dl`` and
 ``mplayer``, ``omxplayer``, or ``mpv`` to actually *play* the videos.
@@ -22,20 +29,6 @@ or, if you're using a Raspberry Pi, using ``omxplayer``::
 Installation
 ------------
 
-From PyPi (easier!)
-~~~~~~~~~~~~~~~~~~~
-
-::
-
-    # Install dependencies
-    sudo apt-get install youtube-dl
-    # Ensure using latest version of youtube-dl to keep up with YouTube API changes
-    sudo youtube-dl -U
-
-    # Install from PyPi
-    sudo apt-get install python-setuptools
-    sudo easy_install whitey
-
 From GitHub
 ~~~~~~~~~~~
 
@@ -48,16 +41,10 @@ From GitHub
 
     # Install from GitHub
     sudo apt-get install python-setuptools
-    git clone https://github.com/rjw57/yt.git
+    git clone https://github.com/yusiangpotato/yt.git
     cd yt
     sudo python setup.py install
 
-One line install for the Raspberry Pi
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-::
-
-    curl -L https://github.com/rjw57/yt/raw/master/tools/install-pi.sh | sh
                         
 Dependencies
 ------------
