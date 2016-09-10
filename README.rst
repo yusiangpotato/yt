@@ -1,12 +1,12 @@
 ``yt``: a command-line YouTube client
 =====================================
 
-NOTE: This is a fork of a old version of yt with the following new features:
-1) the default player changed from mplayer to vlc
-2) the default codec changed to using 720p MP4 (legacy support in youtube)
-3) the ability to use DASH video with the audio automatically fetched*
-4) the OMXplayer and mpv maybe not working at all!
-5) is working with the v2 API but need the developer key to use
+NOTE: This is a fork of a old version of yt with the following new features:  
+1) the default player changed from mplayer to vlc  
+2) the default codec changed to using 720p MP4 (legacy support in youtube)  
+3) the ability to use DASH video with the audio automatically fetched*  
+4) the OMXplayer and mpv maybe not working at all!  
+5) is working with the v3 API but need the developer key to use  
 
 ``yt`` is a command-line front-end to YouTube which allows you to browse YouTube
 videos and play them directly from the command-line. It uses ``youtube-dl`` and
